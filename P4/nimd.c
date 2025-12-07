@@ -76,7 +76,7 @@ char *player_build(const char *type, const char fields[][128], int count) {
         return NULL;
     
     
-    snprintf(buf, 104, "0|%02d|%s|%s", length, type, body);
+    snprintf(buf, 119, "0|%02d|%s|%s", length, type, body); //bandaid fix, should be buf, 104
     return buf;
 }
 
