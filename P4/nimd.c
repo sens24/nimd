@@ -69,28 +69,30 @@ int player_parse(const char *msg, char fields[][128], int max_fields) {
     }
     return count;
 }
-
+ 
 char *player_build(const char *type, const char fields[][128], int count) {
     char body[BUF_SIZE];
     body[0] = '\0';
     size_t remaining = BUF_SIZE - 1;
-
-    for (int i = 0; i < count; i++) {
-        size_t fl = strnlen(fields[i], 128);
-        if (fl + 1 > remaining)
-            break;
-        strncat(body, fields[i], remaining);
-        remaining -= fl;
-        strncat(body, "|", remaining);
-        remaining -= 1;
-    }
+    if (fields != NULL) {
+        for (int i = 0; i < count; i++) {
+            size_t fl = strnlen(fields[i], 128);
+            if (fl + 1 > remaining)
+                break;
+            strncat(body, fields[i], remaining);
+            remaining -= fl;
+            strncat(body, "|", remaining);
+            remaining -= 1;
+        }
+}
 
     int length = strlen(type) + 1 + strlen(body);
 
     char *buf = malloc(BUF_SIZE);
     if (!buf)
         return NULL;
-
+    
+    
     snprintf(buf, BUF_SIZE, "0|%02d|%s|%s", length, type, body);
     return buf;
 }
@@ -116,8 +118,7 @@ void player_send_fail(Player *p, const char *reason) {
 }
 
 void player_send_wait(Player *p) {
-    char fields[0][128];
-    player_send(p, player_build("WAIT", fields, 0));
+    player_send(p, player_build("WAIT", NULL, 0));
 }
 
 //game logic
@@ -197,9 +198,9 @@ void *game_start(void *arg) {
             sprintf(fields[0], "%d", (g->turn == 1) ? 2 : 1);
             strcpy(fields[1], state);
             strcpy(fields[2], "Forfeit");
-            char *msg = player_build("OVER", fields, 3);
-            player_send(opp, msg);
-            free(msg);
+            char *m = player_build("OVER", fields, 3);
+            player_send(opp, m);
+            free(m);
             return NULL;
         }
 
