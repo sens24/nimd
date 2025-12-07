@@ -51,6 +51,41 @@ int player_send(Player *p, const char *message) {
     return msg;
 }
 
+char *player_build(const char *type, const char fields[][128], int count) {
+    char body[104];
+    body[0] = '\0';
+    size_t remaining = 104;
+    if (fields != NULL) {
+        for (int i = 0; i < count; i++) {
+            size_t fl = strnlen(fields[i], 128);
+            if (fl + 1 > remaining)
+                break;
+            strncat(body, fields[i], remaining);
+            remaining -= fl;
+            strncat(body, "|", remaining);
+            remaining -= 1;
+        }
+}
+
+    int length = strlen(type) + 1 + strlen(body);
+    if (length + 5 > 104) { //length check
+        return NULL;
+    }
+    char *buf = malloc(104);
+    if (!buf)
+        return NULL;
+    
+    
+    snprintf(buf, 104, "0|%02d|%s|%s", length, type, body);
+    return buf;
+}
+
+void player_send_fail(Player *p, const char *reason) {
+    char fields[1][128];
+    strncpy(fields[0], reason, 128);
+    player_send(p, player_build("FAIL", fields, 1));
+}
+
 int player_receive(Player *p, char *buf, size_t bufsize) { 
     int total = 0;
 
@@ -77,6 +112,12 @@ int player_receive(Player *p, char *buf, size_t bufsize) {
         lenstr[len2] = '\0';
 
         int msg_len = atoi(lenstr); //length of field 2
+
+        if (msg_len > 104) {
+            player_send_fail(p, "10 Invalid"); // message too long
+            return -1;
+     }
+
         if (msg_len <= 0 || msg_len >= (int)bufsize) return -1;
 
         while (total < msg_len) { //reads until the bytes stated in field 2
@@ -119,32 +160,7 @@ int player_parse(const char *msg, char fields[][128], int max_fields) {
     return count;
 }
  
-char *player_build(const char *type, const char fields[][128], int count) {
-    char body[105];
-    body[0] = '\0';
-    size_t remaining = 104;
-    if (fields != NULL) {
-        for (int i = 0; i < count; i++) {
-            size_t fl = strnlen(fields[i], 128);
-            if (fl + 1 > remaining)
-                break;
-            strncat(body, fields[i], remaining);
-            remaining -= fl;
-            strncat(body, "|", remaining);
-            remaining -= 1;
-        }
-}
 
-    int length = strlen(type) + 1 + strlen(body);
-
-    char *buf = malloc(105);
-    if (!buf)
-        return NULL;
-    
-    
-    snprintf(buf, 111, "0|%02d|%s|%s", length, type, body);
-    return buf;
-}
 
 int player_receive_open(Player *p) {
     char buf[128];
@@ -161,11 +177,7 @@ int player_receive_open(Player *p) {
     return 0;
 }
 
-void player_send_fail(Player *p, const char *reason) {
-    char fields[1][128];
-    strncpy(fields[0], reason, 128);
-    player_send(p, player_build("FAIL", fields, 1));
-}
+
 
 void player_send_wait(Player *p) {
     player_send(p, player_build("WAIT", NULL, 0));
