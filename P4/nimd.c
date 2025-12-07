@@ -51,24 +51,70 @@ int player_send(Player *p, const char *message) {
     return msg;
 }
 
-int player_receive(Player *p, char *buf, size_t bufsize) {
-    int msg = read(p->fd, buf, bufsize - 1);
-    if (msg > 0) buf[msg] = '\0';
-    return msg;
+int player_receive(Player *p, char *buf, size_t bufsize) { 
+    int total = 0;
+
+    while (1) {
+        int n = read(p->fd, buf + total, bufsize - 1 - total);
+        if (n <= 0) return n;
+        total += n;
+        buf[total] = '\0';
+
+        char *bar = strchr(buf, '|');
+        if (!bar) {
+            continue;
+        }
+        char *l = strchr(bar + 1, '|');
+        if (!l) {
+            continue;
+        }
+
+        char lenstr[16];
+        int len2 = l - (bar + 1);
+        if (len2 <= 0 || len2 >= 15) return -1;
+
+        memcpy(lenstr, bar + 1, len2);
+        lenstr[len2] = '\0';
+
+        int msg_len = atoi(lenstr); //length of field 2
+        if (msg_len <= 0 || msg_len >= (int)bufsize) return -1;
+
+        while (total < msg_len) { //reads until the bytes stated in field 2
+            n = read(p->fd, buf + total, bufsize - total-1);
+            if (n <= 0) {
+                return -1;
+            }
+
+            total += n;
+            buf[total] = '\0';
+        }
+
+        buf[msg_len] = '\0';
+        return msg_len;
+    }
 }
 
 int player_parse(const char *msg, char fields[][128], int max_fields) {
     int count = 0;
     const char *s = msg;
-    while (*s && count < max_fields) {
+
+    while (count < max_fields) {
         const char *e = strchr(s, '|');
-        if (!e) return -1;
+
+        if (!e) return -1; //must end in '|'
+
         size_t len = e - s;
+
         if (len >= 128) return -1;
-        strncpy(fields[count], s, len);
+        memcpy(fields[count], s, len);
         fields[count][len] = '\0';
+
         count++;
         s = e + 1;
+
+        if (*s == '\0') {
+            break;
+        }
     }
     return count;
 }
@@ -322,6 +368,12 @@ void *client_thread(void *arg) {
 
     if (strlen(p->name) > 72) {
         player_send_fail(p, "21 Long Name");
+        player_destroy(p);
+        return NULL;
+    }
+
+    if (strchr(p->name, '|') != NULL) {
+        player_send_fail(p, "21 Illegal Character"); //21 Long Name, used for illegal character as well
         player_destroy(p);
         return NULL;
     }
