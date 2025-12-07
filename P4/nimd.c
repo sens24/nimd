@@ -15,7 +15,6 @@
 #endif
 
 #define Q_SIZE 8
-#define BUF_SIZE 1024
 
 volatile int active = 1; // indication if server should keep running
 
@@ -71,9 +70,9 @@ int player_parse(const char *msg, char fields[][128], int max_fields) {
 }
  
 char *player_build(const char *type, const char fields[][128], int count) {
-    char body[BUF_SIZE];
+    char body[105];
     body[0] = '\0';
-    size_t remaining = BUF_SIZE - 1;
+    size_t remaining = 104;
     if (fields != NULL) {
         for (int i = 0; i < count; i++) {
             size_t fl = strnlen(fields[i], 128);
@@ -88,12 +87,12 @@ char *player_build(const char *type, const char fields[][128], int count) {
 
     int length = strlen(type) + 1 + strlen(body);
 
-    char *buf = malloc(BUF_SIZE);
+    char *buf = malloc(105);
     if (!buf)
         return NULL;
     
     
-    snprintf(buf, BUF_SIZE, "0|%02d|%s|%s", length, type, body);
+    snprintf(buf, 105, "0|%02d|%s|%s", length, type, body);
     return buf;
 }
 
