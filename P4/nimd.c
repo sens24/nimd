@@ -24,6 +24,8 @@ typedef struct {
     char name[73];
     int in_game;
     int player_number;
+    int has_opened;
+    int begun; //handles error code 24
 } Player;
 
 Player *player_create(int fd) {
@@ -32,6 +34,8 @@ Player *player_create(int fd) {
     p->name[0] = '\0';
     p->in_game = 0;
     p->player_number = 0;
+    p->has_opened = 0;
+    p->begun = 0;
     return p;
 }
 
@@ -107,6 +111,7 @@ int player_receive_open(Player *p) {
     
     strncpy(p->name, fields[3], 72);
     p->name[72] = '\0';
+    p->has_opened = 1; //error handle
     return 0;
 }
 
@@ -204,6 +209,20 @@ void *game_start(void *arg) {
         }
 
         int count = player_parse(buf, fields, 5);
+        if (count >= 3 && strcmp(fields[2], "MOVE") == 0 && !curr->begun) {
+            player_send_fail(curr, "24 NOT PLAYING");
+            player_destroy(curr);
+            return NULL;
+        }
+
+        if (count >= 3 && strcmp(fields[2], "OPEN") == 0) {
+            player_send_fail(curr, "23 ALREADY OPENED");
+            player_destroy(curr);
+            return NULL;
+        }
+
+        
+
         if (count < 5 || strcmp(fields[2], "MOVE") != 0) {
             char *msg = player_build("FAIL", (char[][128]){"10 Invalid"}, 1);
             player_send(curr, msg);
@@ -317,6 +336,7 @@ void *client_thread(void *arg) {
     pthread_mutex_unlock(&queue_mutex);
 
     player_send_wait(p);
+    p->begun = 1; //game has begun
 
     pthread_mutex_lock(&queue_mutex);
     if (wait_count < Q_SIZE) waiting_players[wait_count++] = p;
