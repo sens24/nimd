@@ -39,8 +39,10 @@ Server types: WAIT, NAME, PLAY, OVER, FAIL
 
 Known Limitations:
 Player names are limited to 72 characters
+names cannot include '|', all other characters are fair game
 Max queue size for the waiting_list is 8
 Maximum message length of 104 bytes
+
 
 
 
