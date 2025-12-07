@@ -170,11 +170,11 @@ void *game_start(void *arg) {
 
     // send NAME messages
     sprintf(fields[0], "1");
-    strcpy(fields[1], g->p2->name);
+    strcpy(fields[1], g->p1->name);
     player_send(g->p2, player_build("NAME", fields, 2));
 
     sprintf(fields[0], "2");
-    strcpy(fields[1], g->p1->name);
+    strcpy(fields[1], g->p2->name);
     player_send(g->p1, player_build("NAME", fields, 2));
 
     while (!game_over(g)) {
