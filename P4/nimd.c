@@ -71,14 +71,27 @@ int player_parse(const char *msg, char fields[][128], int max_fields) {
 }
 
 char *player_build(const char *type, const char fields[][128], int count) {
-    static char buf[BUF_SIZE];
-    char body[BUF_SIZE] = "";
+    char body[BUF_SIZE];
+    body[0] = '\0';
+    size_t remaining = BUF_SIZE - 1;
+
     for (int i = 0; i < count; i++) {
-        strcat(body, fields[i]);
-        strcat(body, "|");
+        size_t fl = strnlen(fields[i], 128);
+        if (fl + 1 > remaining)
+            break;
+        strncat(body, fields[i], remaining);
+        remaining -= fl;
+        strncat(body, "|", remaining);
+        remaining -= 1;
     }
+
     int length = strlen(type) + 1 + strlen(body);
-    snprintf(buf, sizeof(buf), "0|%02d|%s|%s", length, type, body);
+
+    char *buf = malloc(BUF_SIZE);
+    if (!buf)
+        return NULL;
+
+    snprintf(buf, BUF_SIZE, "0|%02d|%s|%s", length, type, body);
     return buf;
 }
 
