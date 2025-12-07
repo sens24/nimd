@@ -99,10 +99,12 @@ int player_receive_open(Player *p) {
     char buf[128];
     int n = player_receive(p, buf, sizeof(buf));
     if (n <= 0) return -1;
-    char fields[5][128];
-    int count = player_parse(buf, fields, 5);
-    if (count < 2 || strcmp(fields[0], "OPEN") != 0) return -1;
-    strncpy(p->name, fields[1], 72);
+
+    char fields[6][128];
+    int count = player_parse(buf, fields, 6);
+    if (count < 2 || strcmp(fields[2], "OPEN") != 0) return -1;
+    
+    strncpy(p->name, fields[3], 72);
     p->name[72] = '\0';
     return 0;
 }
