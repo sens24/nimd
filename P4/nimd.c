@@ -187,21 +187,27 @@ void *game_start(void *arg) {
 
         sprintf(fields[0], "%d", g->turn);
         strcpy(fields[1], state);
-        player_send(curr, player_build("PLAY", fields, 2));
-        player_send(opp, player_build("PLAY", fields, 2));
+        char *msg = player_build("PLAY", fields, 2);
+        player_send(curr, msg);
+        player_send(opp, msg);
+        free(msg);
 
         int n = player_receive(curr, buf, sizeof(buf));
         if (n <= 0) { // forfeit
             sprintf(fields[0], "%d", (g->turn == 1) ? 2 : 1);
             strcpy(fields[1], state);
             strcpy(fields[2], "Forfeit");
-            player_send(opp, player_build("OVER", fields, 3));
+            char *msg = player_build("OVER", fields, 3);
+            player_send(opp, msg);
+            free(msg);
             return NULL;
         }
 
         int count = player_parse(buf, fields, 5);
-        if (count < 4 || strcmp(fields[2], "MOVE") != 0) {
-            player_send(curr, player_build("FAIL", (char[][128]){"10 Invalid"}, 1));
+        if (count < 5 || strcmp(fields[2], "MOVE") != 0) {
+            char *msg = player_build("FAIL", (char[][128]){"10 Invalid"}, 1);
+            player_send(curr, msg);
+            free(msg);
             continue;
         }
 
@@ -213,7 +219,9 @@ void *game_start(void *arg) {
             sprintf(msg, "%d", err);
             char fields[1][128];
             strcpy(fields[0], msg);
-            player_send(curr, player_build("FAIL", fields, 1));
+            char *message = player_build("FAIL", fields, 1);
+            player_send(curr, message);
+            free(message);
             continue;
         }
 
@@ -228,8 +236,11 @@ void *game_start(void *arg) {
     strcpy(fields[1], state);
     strcpy(fields[2], "");
 
-    player_send(g->p1, player_build("OVER", fields, 3));
-    player_send(g->p2, player_build("OVER", fields, 3));
+
+    char *msg = player_build("OVER", fields, 3);
+    player_send(g->p1, msg);
+    player_send(g->p2, msg);
+    free(msg);
 
     game_destroy(g);
     return NULL;
@@ -261,7 +272,6 @@ int name_exists(const char *name) {
     return 0;
 }
 
-// placeholder for opening a listening socket
 int open_listener(const char *port, int qsize) {
     struct addrinfo hints, *res;
     int listener;
