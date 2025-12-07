@@ -92,7 +92,7 @@ char *player_build(const char *type, const char fields[][128], int count) {
         return NULL;
     
     
-    snprintf(buf, 105, "0|%02d|%s|%s", length, type, body);
+    snprintf(buf, 111, "0|%02d|%s|%s", length, type, body);
     return buf;
 }
 
