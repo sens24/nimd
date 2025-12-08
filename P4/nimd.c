@@ -377,6 +377,37 @@ int name_exists(const char *name) {
         if (strcmp(waiting_players[i]->name, name) == 0) return 1;
     return 0;
 }
+int count_players_in_queue() {
+    int count = 0;
+    for (int i = 0; i < wait_count; i++)
+        if (waiting_players[i]->in_game == 0) count++;
+    return count;
+}
+
+int first_player_in_queue() {
+    int count = 0;
+    for (int i = 0; i < wait_count; i++) {
+        if (waiting_players[i]->in_game == 0) {
+            count++;
+            if (count==1){
+                return i;
+            }
+        }
+    }
+    return -1;
+}
+int second_player_in_queue() {
+    int count = 0;
+    for (int i = 0; i < wait_count; i++) {
+        if (waiting_players[i]->in_game == 0) {
+            count++;
+            if (count==2){
+                return i;
+            }
+        }
+    }
+    return -1;
+}
 
 int open_listener(const char *port, int qsize) {
     struct addrinfo hints, *res;
@@ -436,9 +467,12 @@ void *client_thread(void *arg) {
         return NULL;
     }
 
-    if (wait_count >= 2) {
-        Player *p1 = waiting_players[0];
-        Player *p2 = waiting_players[1];
+    int queue_count = count_players_in_queue();
+
+    if (queue_count >= 2) {
+
+        Player *p1 = waiting_players[first_player_in_queue()];
+        Player *p2 = waiting_players[second_player_in_queue()];
         // do NOT remove from queue yet
         pthread_mutex_unlock(&queue_mutex);
 
