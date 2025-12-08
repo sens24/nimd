@@ -10,6 +10,7 @@
 #include <errno.h>
 #include <pthread.h>
 #include <ctype.h>
+#include <stdbool.h>
 
 #ifndef DEBUG
 #define DEBUG
@@ -202,6 +203,9 @@ void game_destroy(Game *g) {
     if (!g) return;
     g->p1->in_game = 0;
     g->p2->in_game = 0;
+    player_destroy(g->p1);
+    player_destroy(g->p2);
+
     free(g);
 }
 
@@ -241,6 +245,7 @@ void *game_start(void *arg) {
     g->p1->begun = 1; //game begun
     g->p2->begun = 1;
 
+    bool ff = false;
     while (!game_over(g)) {
         Player *curr = (g->turn == 1) ? g->p1 : g->p2;
         Player *opp = (g->turn == 1) ? g->p2 : g->p1;
@@ -258,16 +263,14 @@ void *game_start(void *arg) {
 
         int n = player_receive(curr, buf, sizeof(buf));
         if (n <= 0) {
-            sprintf(fields[0], "%d", (g->turn == 1) ? 2 : 1);
-            strcpy(fields[1], state);
-            strcpy(fields[2], "Forfeit");
-            char *m = player_build("OVER", fields, 3);
-            player_send(opp, m);
-            free(m);
+            ff = true;
             break;
         }
 
         int count = player_parse(buf, fields, 5);
+
+
+        //BRO WHAT??????
         if (count >= 3 && strcmp(fields[2], "MOVE") == 0 && !curr->begun) {
             player_send_fail(curr, "24 NOT PLAYING");
             break;
@@ -282,13 +285,15 @@ void *game_start(void *arg) {
             char *msg = player_build("FAIL", (char[][128]){"10 Invalid"}, 1);
             player_send(curr, msg);
             free(msg);
-            continue;
+            ff = true;
+            break;
         }
 
         int pile = atoi(fields[3]);
         int qty = atoi(fields[4]);
         int err = game_move(g, g->turn, pile, qty);
         if (err != 0) {
+            //fairly confident this isn't any of the major fails?
             char msg[128];
             sprintf(msg, "%d", err);
             char fields[1][128];
@@ -309,6 +314,9 @@ void *game_start(void *arg) {
     sprintf(fields[0], "%d", (g->turn == 1) ? 2 : 1);
     strcpy(fields[1], state);
     strcpy(fields[2], "");
+    if (ff == true) {
+        strcpy(fields[2], "Forfeit");
+    }
 
     char *msg = player_build("OVER", fields, 3);
     player_send(g->p1, msg);
