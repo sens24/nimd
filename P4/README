@@ -88,3 +88,17 @@ bytes are sent to the server or see exactly what bytes you have
 received.
 
 The source code for rawc is included.
+
+Testing plan:
+For every single case, try manually testing that case using rawc.
+i.e. testing name length with a name of length 0, 1, 2, 71, 72, and 73 
+    (message formatting was done with the python script openinputformatter.py because I was not counting 72 characters manually)
+testing negative pile indices, and too big pile indices
+testing 0 or negative stone removals, too big stone removals
+testing closing the client connection by stopping the code
+testing duplicate names by joining multiple times
+testing concurrent games by opening many terminals
+testing adding additional fields at the end of a message
+testing adding random characters to the end of a message
+testing to make sure reading too many characters gets truncated to the expected size
+testing to make sure reading not enough characters results in invalid

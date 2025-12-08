@@ -168,7 +168,7 @@ int player_receive_open(Player *p) {
 
     char fields[6][128];
     int count = player_parse(buf, fields, 6);
-    if (count < 2 || strcmp(fields[2], "OPEN") != 0) {
+    if (count != 4 || strcmp(fields[2], "OPEN") != 0) {
         player_send_fail(p, "10 Invalid OPEN message");
         return -1;
     }
@@ -176,6 +176,10 @@ int player_receive_open(Player *p) {
     strncpy(p->name, fields[3], 73);
     p->name[73] = '\0';
     p->has_opened = 1;
+    if (strlen(p->name) == 0){
+        player_send_fail(p, "10 Invalid");
+        return -1;
+    }
     return 0;
 }
 
@@ -239,7 +243,7 @@ pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER;
 void *game_start(void *arg) {
     Game *g = (Game *)arg;
     char buf[1024];
-    char fields[5][128];
+    char fields[6][128];
 
     sprintf(fields[0], "1");
     strcpy(fields[1], g->p2->name);
@@ -277,7 +281,7 @@ void *game_start(void *arg) {
             break;
         }
 
-        int count = player_parse(buf, fields, 5);
+        int count = player_parse(buf, fields, 6);
 
 
         //BRO WHAT??????
@@ -291,7 +295,7 @@ void *game_start(void *arg) {
             break;
         }
 
-        if (count < 5 || strcmp(fields[2], "MOVE") != 0) {
+        if (count != 5 || strcmp(fields[2], "MOVE") != 0) {
             char *msg = player_build("FAIL", (char[][128]){"10 Invalid"}, 1);
             player_send(curr, msg);
             free(msg);
