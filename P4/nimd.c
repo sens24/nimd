@@ -16,7 +16,7 @@
 #define DEBUG
 #endif
 
-#define Q_SIZE 8
+#define Q_SIZE 128
 
 volatile int active = 1;
 
@@ -110,12 +110,12 @@ int player_receive(Player *p, char *buf, size_t bufsize) {
     buf[n] = '\0';
 
     if (n < 5) {
-        player_send_fail(p, "10 Invalid message");
+        player_send_fail(p, "10 Invalid");
         return -1;
     }
 
     if (buf[0] != '0' || buf[1] != '|' || !isdigit(buf[2]) || !isdigit(buf[3]) || buf[4] != '|') {
-        player_send_fail(p, "10 Invalid message");
+        player_send_fail(p, "10 Invalid");
         return -1;
     }
 
@@ -132,7 +132,7 @@ int player_receive(Player *p, char *buf, size_t bufsize) {
         }
         else{
             //message too short
-            player_send_fail(p, "10 Invalid message");
+            player_send_fail(p, "10 Invalid");
             return -1;
         }
     }
@@ -141,7 +141,7 @@ int player_receive(Player *p, char *buf, size_t bufsize) {
      int field_count = player_parse(buf, fields, 6);
  
      if (field_count < 3) {
-         player_send_fail(p, "10 Invalid message");
+         player_send_fail(p, "10 Invalid");
          return -1;
     }
 
@@ -154,7 +154,7 @@ int player_receive(Player *p, char *buf, size_t bufsize) {
         strcmp(type, "PLAY") != 0 &&   // server only
         strcmp(type, "OVER") != 0) {   // server only
 
-        player_send_fail(p, "10 Invalid message type");
+        player_send_fail(p, "10 Invalid"); //invalid message type
         return -1;
     }
 
@@ -169,7 +169,7 @@ int player_receive_open(Player *p) {
     char fields[6][128];
     int count = player_parse(buf, fields, 6);
     if (count != 4 || strcmp(fields[2], "OPEN") != 0) {
-        player_send_fail(p, "10 Invalid OPEN message");
+        player_send_fail(p, "10 Invalid"); //invalid OPEN
         return -1;
     }
 
@@ -531,6 +531,3 @@ int main(int argc, char **argv) {
     close(listener);
     return 0;
 }
-
-
-
