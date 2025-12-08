@@ -122,9 +122,19 @@ int player_receive(Player *p, char *buf, size_t bufsize) {
     int declared_len = (buf[2] - '0') * 10 + (buf[3] - '0');
     int actual_len = n - 5;
 
+    //length mismatch
     if (declared_len != actual_len) {
-        player_send_fail(p, "10 Invalid message length");
-        return -1;
+        //player_send_fail(p, "10 Invalid message length");
+        if (declared_len<actual_len){
+            //we received more chars, so truncate and do the rest
+            buf[declared_len+5]='\0';
+
+        }
+        else{
+            //message too short
+            player_send_fail(p, "10 Invalid message");
+            return -1;
+        }
     }
 
      char fields[6][128];
