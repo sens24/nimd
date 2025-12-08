@@ -9,6 +9,7 @@
 #include <signal.h>
 #include <errno.h>
 #include <pthread.h>
+#include <ctype.h>
 
 #ifndef DEBUG
 #define DEBUG
@@ -16,16 +17,16 @@
 
 #define Q_SIZE 8
 
-volatile int active = 1; // indication if server should keep running
+volatile int active = 1;
 
-//player
+
 typedef struct {
     int fd;
     char name[73];
     int in_game;
     int player_number;
     int has_opened;
-    int begun; //handles error code 24
+    int begun;
 } Player;
 
 Player *player_create(int fd) {
@@ -51,11 +52,7 @@ int player_send(Player *p, const char *message) {
     return msg;
 }
 
-int player_receive(Player *p, char *buf, size_t bufsize) {
-    int msg = read(p->fd, buf, bufsize - 1);
-    if (msg > 0) buf[msg] = '\0';
-    return msg;
-}
+
 
 int player_parse(const char *msg, char fields[][128], int max_fields) {
     int count = 0;
@@ -72,7 +69,7 @@ int player_parse(const char *msg, char fields[][128], int max_fields) {
     }
     return count;
 }
- 
+
 char *player_build(const char *type, const char fields[][128], int count) {
     char body[105];
     body[0] = '\0';
@@ -87,19 +84,72 @@ char *player_build(const char *type, const char fields[][128], int count) {
             strncat(body, "|", remaining);
             remaining -= 1;
         }
-}
+    }
 
     int length = strlen(type) + 1 + strlen(body);
-
     char *buf = malloc(105);
     if (!buf)
         return NULL;
-    
-    
-    snprintf(buf, 111, "0|%02d|%s|%s", length, type, body);
+    snprintf(buf, 105, "0|%02d|%s|%s", length, type, body);
     return buf;
 }
 
+void player_send_fail(Player *p, const char *reason) {
+    char fields[1][128];
+    strncpy(fields[0], reason, 128);
+    char *temp = player_build("FAIL", fields, 1);
+    player_send(p, temp);
+    free(temp);
+}
+
+int player_receive(Player *p, char *buf, size_t bufsize) {
+    int n = read(p->fd, buf, bufsize - 1);
+    if (n <= 0) return n;
+    buf[n] = '\0';
+
+    if (n < 5) {
+        player_send_fail(p, "10 Invalid message");
+        return -1;
+    }
+
+    if (buf[0] != '0' || buf[1] != '|' || !isdigit(buf[2]) || !isdigit(buf[3]) || buf[4] != '|') {
+        player_send_fail(p, "10 Invalid message");
+        return -1;
+    }
+
+    int declared_len = (buf[2] - '0') * 10 + (buf[3] - '0');
+    int actual_len = n - 5;
+
+    if (declared_len != actual_len) {
+        player_send_fail(p, "10 Invalid message length");
+        return -1;
+    }
+
+     char fields[6][128];
+     int field_count = player_parse(buf, fields, 6);
+ 
+     if (field_count < 3) {
+         player_send_fail(p, "10 Invalid message");
+         return -1;
+    }
+
+     const char *type = fields[2];
+
+     if (strcmp(type, "OPEN") != 0 &&
+        strcmp(type, "MOVE") != 0 &&
+        strcmp(type, "FAIL")  != 0 &&
+        strcmp(type, "NAME") != 0 &&   // only server will send this
+        strcmp(type, "PLAY") != 0 &&   // only server will send this
+        strcmp(type, "OVER") != 0) {   // only server will send this
+
+        player_send_fail(p, "10 Invalid message type");
+        return -1;
+    }
+
+
+
+    return n;
+}
 int player_receive_open(Player *p) {
     char buf[128];
     int n = player_receive(p, buf, sizeof(buf));
@@ -107,25 +157,24 @@ int player_receive_open(Player *p) {
 
     char fields[6][128];
     int count = player_parse(buf, fields, 6);
-    if (count < 2 || strcmp(fields[2], "OPEN") != 0) return -1;
-    
+    if (count < 2 || strcmp(fields[2], "OPEN") != 0) {
+        player_send_fail(p, "10 Invalid OPEN message");
+        return -1;
+    }
+
     strncpy(p->name, fields[3], 72);
     p->name[72] = '\0';
-    p->has_opened = 1; //error handle
+    p->has_opened = 1;
     return 0;
 }
 
-void player_send_fail(Player *p, const char *reason) {
-    char fields[1][128];
-    strncpy(fields[0], reason, 128);
-    player_send(p, player_build("FAIL", fields, 1));
-}
 
 void player_send_wait(Player *p) {
-    player_send(p, player_build("WAIT", NULL, 0));
+    char *temp = player_build("WAIT", NULL, 0);
+    player_send(p, temp);
+    free(temp);
 }
 
-//game logic
 typedef struct {
     Player *p1;
     Player *p2;
@@ -156,9 +205,9 @@ void game_destroy(Game *g) {
 }
 
 int game_move(Game *g, int player_num, int pile, int count) {
-    if (player_num != g->turn) return 31; // impatient
-    if (pile < 0 || pile >= 5) return 32; // pile index error
-    if (count <= 0 || count > g->board[pile]) return 33; // quantity error
+    if (player_num != g->turn) return 31;
+    if (pile < 0 || pile >= 5) return 32;
+    if (count <= 0 || count > g->board[pile]) return 33;
     g->board[pile] -= count;
     return 0;
 }
@@ -173,22 +222,24 @@ void *game_start(void *arg) {
     char buf[1024];
     char fields[5][128];
 
-    // send NAME messages
     sprintf(fields[0], "1");
     strcpy(fields[1], g->p2->name);
-    player_send(g->p1, player_build("NAME", fields, 2));
-
+    char *temp = player_build("NAME", fields, 2);
+    player_send(g->p1, temp);
     sprintf(fields[0], "2");
     strcpy(fields[1], g->p1->name);
-    player_send(g->p2, player_build("NAME", fields, 2));
-
+    
+    player_send(g->p2, temp);
+    free(temp);
+    g->p1->begun = 1; //game begun
+    g->p2->begun = 1;
     while (!game_over(g)) {
         Player *curr = (g->turn == 1) ? g->p1 : g->p2;
-        Player *opp  = (g->turn == 1) ? g->p2 : g->p1;
+        Player *opp = (g->turn == 1) ? g->p2 : g->p1;
 
         char state[128];
         snprintf(state, sizeof(state), "%d %d %d %d %d",
-            g->board[0], g->board[1], g->board[2], g->board[3], g->board[4]);
+                 g->board[0], g->board[1], g->board[2], g->board[3], g->board[4]);
 
         sprintf(fields[0], "%d", g->turn);
         strcpy(fields[1], state);
@@ -198,13 +249,14 @@ void *game_start(void *arg) {
         free(msg);
 
         int n = player_receive(curr, buf, sizeof(buf));
-        if (n <= 0) { // forfeit
+        if (n <= 0) {
             sprintf(fields[0], "%d", (g->turn == 1) ? 2 : 1);
             strcpy(fields[1], state);
             strcpy(fields[2], "Forfeit");
             char *m = player_build("OVER", fields, 3);
             player_send(opp, m);
             free(m);
+            game_destroy(g);
             return NULL;
         }
 
@@ -221,8 +273,6 @@ void *game_start(void *arg) {
             return NULL;
         }
 
-        
-
         if (count < 5 || strcmp(fields[2], "MOVE") != 0) {
             char *msg = player_build("FAIL", (char[][128]){"10 Invalid"}, 1);
             player_send(curr, msg);
@@ -231,8 +281,8 @@ void *game_start(void *arg) {
         }
 
         int pile = atoi(fields[3]);
-        int qty  = atoi(fields[4]);
-        int err  = game_move(g, g->turn, pile, qty);
+        int qty = atoi(fields[4]);
+        int err = game_move(g, g->turn, pile, qty);
         if (err != 0) {
             char msg[128];
             sprintf(msg, "%d", err);
@@ -249,12 +299,11 @@ void *game_start(void *arg) {
 
     char state[128];
     snprintf(state, sizeof(state), "%d %d %d %d %d",
-        g->board[0], g->board[1], g->board[2], g->board[3], g->board[4]);
+             g->board[0], g->board[1], g->board[2], g->board[3], g->board[4]);
 
-    sprintf(fields[0], "%d", (g->turn == 1) ? 2 : 1); // winner
+    sprintf(fields[0], "%d", (g->turn == 1) ? 2 : 1);
     strcpy(fields[1], state);
     strcpy(fields[2], "");
-
 
     char *msg = player_build("OVER", fields, 3);
     player_send(g->p1, msg);
@@ -265,15 +314,14 @@ void *game_start(void *arg) {
     return NULL;
 }
 
-// server logic
 Player *waiting_players[Q_SIZE];
 int wait_count = 0;
 pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 void handler(int sn) {
-     (void) sn;
-     active = 0;
-     }
+    (void)sn;
+    active = 0;
+}
 
 void install_handlers() {
     struct sigaction act;
@@ -336,7 +384,7 @@ void *client_thread(void *arg) {
     pthread_mutex_unlock(&queue_mutex);
 
     player_send_wait(p);
-    p->begun = 1; //game has begun
+  
 
     pthread_mutex_lock(&queue_mutex);
     if (wait_count < Q_SIZE) waiting_players[wait_count++] = p;
@@ -406,3 +454,6 @@ int main(int argc, char **argv) {
     close(listener);
     return 0;
 }
+
+
+
