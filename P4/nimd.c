@@ -301,7 +301,7 @@ void *game_start(void *arg) {
             if (*curr_connected) FD_SET(curr->fd, &readfds);
             if (*opp_connected) FD_SET(opp->fd, &readfds);
 
-            // If no FDs to monitor, break
+            // If no FDs, break
             int fd_count = (*curr_connected ? 1 : 0) + (*opp_connected ? 1 : 0);
             if (fd_count == 0) {
                 ff = true;
@@ -314,11 +314,11 @@ void *game_start(void *arg) {
                 break;
             }
 
-            // Check if opponent sent something (impatient!)
+            // impatient
             if (*opp_connected && FD_ISSET(opp->fd, &readfds)) {
                 int n = player_receive(opp, buf, sizeof(buf));
                 if (n <= 0) {
-                    // Opponent disconnected - current player wins by forfeit
+                    // Opponent disconnected, current player wins by forfeit
                     close(opp->fd);
                     opp->fd = -1;
                     *opp_connected = false;
@@ -328,7 +328,7 @@ void *game_start(void *arg) {
 
                 int count = player_parse(buf, fields, 6);
                 if (count >= 3 && strcmp(fields[2], "MOVE") == 0) {
-                    // Opponent sent MOVE during current player's turn - impatient!
+                    // Opponent sent MOVE during current player's turn, impatient
                     player_send_fail(opp, "31 Impatient");
                 } else if (count >= 3 && strcmp(fields[2], "OPEN") == 0) {
                     player_send_fail(opp, "23 Already Open");
@@ -343,7 +343,7 @@ void *game_start(void *arg) {
                 // Continue waiting for current player's move
             }
 
-            // Check if current player sent their move
+            // if current player sent their move
             if (*curr_connected && FD_ISSET(curr->fd, &readfds)) {
                 int n = player_receive(curr, buf, sizeof(buf));
                 if (n <= 0) {
@@ -381,7 +381,22 @@ void *game_start(void *arg) {
                 int err = game_move(g, g->turn, pile, qty);
                 if (err != 0) {
                     char msg[128];
-                    sprintf(msg, "%d", err);
+                    if (err == 31){
+                        //impatient
+                        sprintf(msg, "31 Impatient");
+                    }
+                    else if (err == 32){
+                        //pile index
+                        sprintf(msg, "32 Pile Index");
+                    }
+                    else if (err == 33){
+                        //quantity
+                        sprintf(msg, "33 Quantity");
+                    }
+                    else{
+                        //weird error, not supposed to happen
+                        sprintf(msg, "%d", err);
+                    }
                     char fail_fields[1][128];
                     strcpy(fail_fields[0], msg);
                     char *message = player_build("FAIL", fail_fields, 1);
