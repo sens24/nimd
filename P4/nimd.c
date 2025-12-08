@@ -5,6 +5,8 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <sys/select.h>
+#include <sys/time.h>
 #include <netdb.h>
 #include <signal.h>
 #include <errno.h>
@@ -43,7 +45,10 @@ Player *player_create(int fd) {
 
 void player_destroy(Player *p) {
     if (!p) return;
-    close(p->fd);
+    if (p->fd >= 0) {
+        close(p->fd);
+        p->fd = -1;
+    }
     free(p);
 }
 
@@ -260,9 +265,14 @@ void *game_start(void *arg) {
     g->p2->begun = 1;
 
     bool ff = false;
+    bool p1_connected = true;
+    bool p2_connected = true;
+
     while (!game_over(g)) {
         Player *curr = (g->turn == 1) ? g->p1 : g->p2;
         Player *opp = (g->turn == 1) ? g->p2 : g->p1;
+        bool *curr_connected = (g->turn == 1) ? &p1_connected : &p2_connected;
+        bool *opp_connected = (g->turn == 1) ? &p2_connected : &p1_connected;
 
         char state[128];
         snprintf(state, sizeof(state), "%d %d %d %d %d",
@@ -271,53 +281,120 @@ void *game_start(void *arg) {
         sprintf(fields[0], "%d", g->turn);
         strcpy(fields[1], state);
         char *msg = player_build("PLAY", fields, 2);
-        player_send(curr, msg);
-        player_send(opp, msg);
+        if (*curr_connected) player_send(curr, msg);
+        if (*opp_connected) player_send(opp, msg);
         free(msg);
 
-        int n = player_receive(curr, buf, sizeof(buf));
-        if (n <= 0) {
-            ff = true;
-            break;
+        // Extra credit: Use select() to monitor both players
+        fd_set readfds;
+        int max_fd = (curr->fd > opp->fd) ? curr->fd : opp->fd;
+        bool move_received = false;
+
+        while (!move_received && !ff) {
+            // If both players disconnected, break immediately
+            if (!*curr_connected && !*opp_connected) {
+                ff = true;
+                break;
+            }
+
+            FD_ZERO(&readfds);
+            if (*curr_connected) FD_SET(curr->fd, &readfds);
+            if (*opp_connected) FD_SET(opp->fd, &readfds);
+
+            // If no FDs to monitor, break
+            int fd_count = (*curr_connected ? 1 : 0) + (*opp_connected ? 1 : 0);
+            if (fd_count == 0) {
+                ff = true;
+                break;
+            }
+
+            int ready = select(max_fd + 1, &readfds, NULL, NULL, NULL);
+            if (ready < 0) {
+                ff = true;
+                break;
+            }
+
+            // Check if opponent sent something (impatient!)
+            if (*opp_connected && FD_ISSET(opp->fd, &readfds)) {
+                int n = player_receive(opp, buf, sizeof(buf));
+                if (n <= 0) {
+                    // Opponent disconnected - current player wins by forfeit
+                    close(opp->fd);
+                    opp->fd = -1;
+                    *opp_connected = false;
+                    ff = true;
+                    break;
+                }
+
+                int count = player_parse(buf, fields, 6);
+                if (count >= 3 && strcmp(fields[2], "MOVE") == 0) {
+                    // Opponent sent MOVE during current player's turn - impatient!
+                    player_send_fail(opp, "31 Impatient");
+                } else if (count >= 3 && strcmp(fields[2], "OPEN") == 0) {
+                    player_send_fail(opp, "23 Already Open");
+                    close(opp->fd);
+                    opp->fd = -1;
+                    *opp_connected = false;
+                    ff = true;
+                    break;
+                } else {
+                    player_send_fail(opp, "10 Invalid");
+                }
+                // Continue waiting for current player's move
+            }
+
+            // Check if current player sent their move
+            if (*curr_connected && FD_ISSET(curr->fd, &readfds)) {
+                int n = player_receive(curr, buf, sizeof(buf));
+                if (n <= 0) {
+                    close(curr->fd);
+                    curr->fd = -1;
+                    *curr_connected = false;
+                    ff = true;
+                    break;
+                }
+
+                int count = player_parse(buf, fields, 6);
+
+                if (count >= 3 && strcmp(fields[2], "OPEN") == 0) {
+                    player_send_fail(curr, "23 Already Open");
+                    close(curr->fd);
+                    curr->fd = -1;
+                    *curr_connected = false;
+                    ff = true;
+                    break;
+                }
+
+                if (count != 5 || strcmp(fields[2], "MOVE") != 0) {
+                    char *msg = player_build("FAIL", (char[][128]){"10 Invalid"}, 1);
+                    player_send(curr, msg);
+                    free(msg);
+                    close(curr->fd);
+                    curr->fd = -1;
+                    *curr_connected = false;
+                    ff = true;
+                    break;
+                }
+
+                int pile = atoi(fields[3]);
+                int qty = atoi(fields[4]);
+                int err = game_move(g, g->turn, pile, qty);
+                if (err != 0) {
+                    char msg[128];
+                    sprintf(msg, "%d", err);
+                    char fail_fields[1][128];
+                    strcpy(fail_fields[0], msg);
+                    char *message = player_build("FAIL", fail_fields, 1);
+                    player_send(curr, message);
+                    free(message);
+                    continue;
+                }
+
+                move_received = true;
+            }
         }
 
-        int count = player_parse(buf, fields, 6);
-
-
-        //BRO WHAT??????
-        if (count >= 3 && strcmp(fields[2], "MOVE") == 0 && !curr->begun) {
-            player_send_fail(curr, "24 NOT PLAYING");
-            break;
-        }
-
-        if (count >= 3 && strcmp(fields[2], "OPEN") == 0) {
-            player_send_fail(curr, "23 ALREADY OPENED");
-            break;
-        }
-
-        if (count != 5 || strcmp(fields[2], "MOVE") != 0) {
-            char *msg = player_build("FAIL", (char[][128]){"10 Invalid"}, 1);
-            player_send(curr, msg);
-            free(msg);
-            ff = true;
-            break;
-        }
-
-        int pile = atoi(fields[3]);
-        int qty = atoi(fields[4]);
-        int err = game_move(g, g->turn, pile, qty);
-        if (err != 0) {
-            //fairly confident this isn't any of the major fails?
-            char msg[128];
-            sprintf(msg, "%d", err);
-            char fields[1][128];
-            strcpy(fields[0], msg);
-            char *message = player_build("FAIL", fields, 1);
-            player_send(curr, message);
-            free(message);
-            continue;
-        }
-
+        if (ff) break;
         g->turn = (g->turn == 1) ? 2 : 1;
     }
 
@@ -333,8 +410,9 @@ void *game_start(void *arg) {
     }
 
     char *msg = player_build("OVER", fields, 3);
-    player_send(g->p1, msg);
-    player_send(g->p2, msg);
+    // Only send OVER to players who are still connected
+    if (p1_connected) player_send(g->p1, msg);
+    if (p2_connected) player_send(g->p2, msg);
     free(msg);
 
     pthread_mutex_lock(&queue_mutex);
@@ -452,15 +530,13 @@ void *client_thread(void *arg) {
     if (name_exists(p->name)) {
         pthread_mutex_unlock(&queue_mutex);
         player_send_fail(p, "22 Already Playing");
-        
-        shutdown(p->fd, SHUT_WR);
-        free(p);
+        player_destroy(p);
         return NULL;
     }
     pthread_mutex_unlock(&queue_mutex);
 
     player_send_wait(p);
-  
+
 
     pthread_mutex_lock(&queue_mutex);
     if (wait_count < Q_SIZE) waiting_players[wait_count++] = p;
@@ -488,6 +564,80 @@ void *client_thread(void *arg) {
         pthread_mutex_unlock(&queue_mutex);
     }
 
+    // Extra credit: Monitor socket while waiting for game to start
+    while (!p->in_game) {
+        fd_set readfds;
+        struct timeval tv;
+        FD_ZERO(&readfds);
+        FD_SET(p->fd, &readfds);
+
+        // Use timeout so we can periodically check in_game flag
+        tv.tv_sec = 0;
+        tv.tv_usec = 100000; // 100ms timeout
+
+        int ready = select(p->fd + 1, &readfds, NULL, NULL, &tv);
+
+        if (ready > 0 && FD_ISSET(p->fd, &readfds)) {
+            // Player sent something while waiting - check what it is
+            char buf[128];
+            int n = player_receive(p, buf, sizeof(buf));
+            if (n <= 0) {
+                // Player disconnected while waiting - remove from queue
+                pthread_mutex_lock(&queue_mutex);
+                for (int i = 0; i < wait_count; i++) {
+                    if (waiting_players[i] == p) {
+                        for (int j = i + 1; j < wait_count; j++)
+                            waiting_players[j - 1] = waiting_players[j];
+                        wait_count--;
+                        break;
+                    }
+                }
+                pthread_mutex_unlock(&queue_mutex);
+                player_destroy(p);
+                return NULL;
+            }
+
+            char fields[6][128];
+            int count = player_parse(buf, fields, 6);
+
+            if (count >= 3 && strcmp(fields[2], "MOVE") == 0) {
+                // MOVE sent before game starts
+                player_send_fail(p, "24 Not Playing");
+                pthread_mutex_lock(&queue_mutex);
+                for (int i = 0; i < wait_count; i++) {
+                    if (waiting_players[i] == p) {
+                        for (int j = i + 1; j < wait_count; j++)
+                            waiting_players[j - 1] = waiting_players[j];
+                        wait_count--;
+                        break;
+                    }
+                }
+                pthread_mutex_unlock(&queue_mutex);
+                player_destroy(p);
+                return NULL;
+            } else if (count >= 3 && strcmp(fields[2], "OPEN") == 0) {
+                // OPEN sent second time
+                player_send_fail(p, "23 Already Open");
+                pthread_mutex_lock(&queue_mutex);
+                for (int i = 0; i < wait_count; i++) {
+                    if (waiting_players[i] == p) {
+                        for (int j = i + 1; j < wait_count; j++)
+                            waiting_players[j - 1] = waiting_players[j];
+                        wait_count--;
+                        break;
+                    }
+                }
+                pthread_mutex_unlock(&queue_mutex);
+                player_destroy(p);
+                return NULL;
+            } else {
+                // Some other invalid message
+                player_send_fail(p, "10 Invalid");
+            }
+        }
+    }
+
+    // Game has started - game_start thread has taken over
     return NULL;
 }
 
