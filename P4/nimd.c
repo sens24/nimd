@@ -22,7 +22,7 @@ volatile int active = 1;
 
 typedef struct {
     int fd;
-    char name[73];
+    char name[74];
     int in_game;
     int player_number;
     int has_opened;
@@ -162,8 +162,8 @@ int player_receive_open(Player *p) {
         return -1;
     }
 
-    strncpy(p->name, fields[3], 72);
-    p->name[72] = '\0';
+    strncpy(p->name, fields[3], 73);
+    p->name[73] = '\0';
     p->has_opened = 1;
     return 0;
 }
