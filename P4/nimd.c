@@ -139,9 +139,9 @@ int player_receive(Player *p, char *buf, size_t bufsize) {
      if (strcmp(type, "OPEN") != 0 &&
         strcmp(type, "MOVE") != 0 &&
         strcmp(type, "FAIL")  != 0 &&
-        strcmp(type, "NAME") != 0 &&   // only server will send this
-        strcmp(type, "PLAY") != 0 &&   // only server will send this
-        strcmp(type, "OVER") != 0) {   // only server will send this
+        strcmp(type, "NAME") != 0 &&   // server only
+        strcmp(type, "PLAY") != 0 &&   // server only
+        strcmp(type, "OVER") != 0) {   // server only
 
         player_send_fail(p, "10 Invalid message type");
         return -1;
@@ -315,7 +315,6 @@ void *game_start(void *arg) {
     player_send(g->p2, msg);
     free(msg);
 
-    // ---- REMOVE PLAYERS FROM WAIT QUEUE HERE ----
     pthread_mutex_lock(&queue_mutex);
     for (int i = 0; i < wait_count; i++) {
         if (waiting_players[i] == g->p1) {
@@ -334,7 +333,6 @@ void *game_start(void *arg) {
         }
     }
     pthread_mutex_unlock(&queue_mutex);
-    // ---- END REMOVAL ----
 
     game_destroy(g);
     return NULL;
