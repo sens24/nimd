@@ -24,7 +24,7 @@ To manage players, there are functions to handle creating/initializing, destroyi
 and receiving messages. 
 
 client_thread/main:
-there exists a waiting queue, with a max of 8 players, for players who are in the process of matching
+there exists a waiting queue, with a max of 8 players, for players who are in the process of matching and those that are currently active in a game
 Each client has their own client_thread, which receives OPEN message with player name, validates name length 
 and uniqueness, sends WAIT message while waiting for an opponent, and starts a game whenever there are two
 players available. 
