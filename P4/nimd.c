@@ -102,6 +102,7 @@ void player_send_fail(Player *p, const char *reason) {
     free(temp);
 }
 
+
 int player_receive(Player *p, char *buf, size_t bufsize) {
     int n = read(p->fd, buf, bufsize - 1);
     if (n <= 0) return n;
@@ -146,10 +147,9 @@ int player_receive(Player *p, char *buf, size_t bufsize) {
         return -1;
     }
 
-
-
     return n;
 }
+
 int player_receive_open(Player *p) {
     char buf[128];
     int n = player_receive(p, buf, sizeof(buf));
@@ -174,6 +174,7 @@ void player_send_wait(Player *p) {
     player_send(p, temp);
     free(temp);
 }
+
 
 typedef struct {
     Player *p1;
@@ -217,6 +218,10 @@ int game_over(Game *g) {
     return 1;
 }
 
+Player *waiting_players[Q_SIZE];
+int wait_count = 0;
+pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 void *game_start(void *arg) {
     Game *g = (Game *)arg;
     char buf[1024];
@@ -226,13 +231,16 @@ void *game_start(void *arg) {
     strcpy(fields[1], g->p2->name);
     char *temp = player_build("NAME", fields, 2);
     player_send(g->p1, temp);
+    free(temp);
     sprintf(fields[0], "2");
     strcpy(fields[1], g->p1->name);
+    char *temp2 = player_build("NAME", fields, 2);
+    player_send(g->p2, temp2);
+    free(temp2);
     
-    player_send(g->p2, temp);
-    free(temp);
     g->p1->begun = 1; //game begun
     g->p2->begun = 1;
+
     while (!game_over(g)) {
         Player *curr = (g->turn == 1) ? g->p1 : g->p2;
         Player *opp = (g->turn == 1) ? g->p2 : g->p1;
@@ -256,21 +264,18 @@ void *game_start(void *arg) {
             char *m = player_build("OVER", fields, 3);
             player_send(opp, m);
             free(m);
-            game_destroy(g);
-            return NULL;
+            break;
         }
 
         int count = player_parse(buf, fields, 5);
         if (count >= 3 && strcmp(fields[2], "MOVE") == 0 && !curr->begun) {
             player_send_fail(curr, "24 NOT PLAYING");
-            player_destroy(curr);
-            return NULL;
+            break;
         }
 
         if (count >= 3 && strcmp(fields[2], "OPEN") == 0) {
             player_send_fail(curr, "23 ALREADY OPENED");
-            player_destroy(curr);
-            return NULL;
+            break;
         }
 
         if (count < 5 || strcmp(fields[2], "MOVE") != 0) {
@@ -310,13 +315,31 @@ void *game_start(void *arg) {
     player_send(g->p2, msg);
     free(msg);
 
+    // ---- REMOVE PLAYERS FROM WAIT QUEUE HERE ----
+    pthread_mutex_lock(&queue_mutex);
+    for (int i = 0; i < wait_count; i++) {
+        if (waiting_players[i] == g->p1) {
+            for (int j = i + 1; j < wait_count; j++)
+                waiting_players[j - 1] = waiting_players[j];
+            wait_count--;
+            break;
+        }
+    }
+    for (int i = 0; i < wait_count; i++) {
+        if (waiting_players[i] == g->p2) {
+            for (int j = i + 1; j < wait_count; j++)
+                waiting_players[j - 1] = waiting_players[j];
+            wait_count--;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&queue_mutex);
+    // ---- END REMOVAL ----
+
     game_destroy(g);
     return NULL;
 }
 
-Player *waiting_players[Q_SIZE];
-int wait_count = 0;
-pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 void handler(int sn) {
     (void)sn;
@@ -378,7 +401,9 @@ void *client_thread(void *arg) {
     if (name_exists(p->name)) {
         pthread_mutex_unlock(&queue_mutex);
         player_send_fail(p, "22 Already Playing");
-        player_destroy(p);
+        
+        shutdown(p->fd, SHUT_WR);
+        free(p);
         return NULL;
     }
     pthread_mutex_unlock(&queue_mutex);
@@ -398,9 +423,7 @@ void *client_thread(void *arg) {
     if (wait_count >= 2) {
         Player *p1 = waiting_players[0];
         Player *p2 = waiting_players[1];
-        for (int i = 2; i < wait_count; i++)
-            waiting_players[i - 2] = waiting_players[i];
-        wait_count -= 2;
+        // do NOT remove from queue yet
         pthread_mutex_unlock(&queue_mutex);
 
         Game *g = game_create(p1, p2);
