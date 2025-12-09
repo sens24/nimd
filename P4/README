@@ -11,8 +11,8 @@ game handles the game logic, player represents a player, and client_threadmain h
 The server handles single games, concurrent games, and the extra credit
 
 Game:
-the Game struct stores two players, the board including 5 piles, and whose turn it is (1 or 2)
-the game_start function is the main game loop, and it begins by sending the player names, board state, and current turn. 
+Game struct stores two players, the board including 5 piles, and whose turn it is (1 or 2)
+game_start function: the main game loop, and it begins by sending the player names, board state, and current turn. 
 It manages receiving and validating moves (validation based on the error codes provided in the writeup), and proceeds
 to update the board and swap turns. 
 Every move, the game checks if the game is over by iterating over the board array and checking the contents of each pile.
