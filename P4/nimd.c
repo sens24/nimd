@@ -6,7 +6,6 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/select.h>
-#include <sys/time.h>
 #include <netdb.h>
 #include <signal.h>
 #include <errno.h>
@@ -129,7 +128,6 @@ int player_receive(Player *p, char *buf, size_t bufsize) {
 
     //length mismatch
     if (declared_len != actual_len) {
-        //player_send_fail(p, "10 Invalid message length");
         if (declared_len<actual_len){
             //we received more chars, so truncate and do the rest
             buf[declared_len+5]='\0';
@@ -174,7 +172,7 @@ int player_receive_open(Player *p) {
     char fields[6][128];
     int count = player_parse(buf, fields, 6);
     if (count != 4 || strcmp(fields[2], "OPEN") != 0) {
-        player_send_fail(p, "10 Invalid"); //invalid OPEN
+        player_send_fail(p, "10 Invalid");
         return -1;
     }
 
@@ -245,6 +243,20 @@ Player *waiting_players[Q_SIZE];
 int wait_count = 0;
 pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+void remove_player(Player* p) {
+
+
+    for (int i = 0; i < wait_count; i++) {
+        if (waiting_players[i] == p) {
+            for (int j = i + 1; j < wait_count; j++)
+                waiting_players[j - 1] = waiting_players[j];
+            wait_count--;
+            break;
+        }
+    }
+
+}
+
 void *game_start(void *arg) {
     Game *g = (Game *)arg;
     char buf[1024];
@@ -261,12 +273,14 @@ void *game_start(void *arg) {
     player_send(g->p2, temp2);
     free(temp2);
     
-    g->p1->begun = 1; //game begun
+    g->p1->begun = 1;
     g->p2->begun = 1;
 
     bool ff = false;
     bool p1_connected = true;
     bool p2_connected = true;
+
+    int winner = 0;
 
     while (!game_over(g)) {
         Player *curr;
@@ -275,14 +289,14 @@ void *game_start(void *arg) {
         }
         else { 
             curr = g->p2;
-             }
+        }
 
         Player *opp;
         if (g->turn == 1) {
             opp =g->p2;
-         } else {
+        } else {
             opp = g->p1;
-         }
+        }
         bool *curr_connected;
         if (g->turn == 1) { 
             curr_connected = &p1_connected; 
@@ -321,7 +335,10 @@ void *game_start(void *arg) {
         bool received = false;
 
         while (!received && !ff) {
+            //both are gone
             if (!*curr_connected && !*opp_connected) {
+                //it doesn't matter who wins, so set to 1
+                winner = 1;
                 ff = true;
                 break;
             }
@@ -339,7 +356,10 @@ void *game_start(void *arg) {
                 fd_count++;
             }
 
+            //both are gone
             if (fd_count == 0) {
+                //it doesn't matter who wins, so set to 1
+                winner = 1;
                 ff = true;
                 break;
             }
@@ -355,6 +375,8 @@ void *game_start(void *arg) {
                 int n = player_receive(opp, buf, sizeof(buf));
                 if (n <= 0) {
                     // forfeit
+                    //current player wins
+                    winner = g->turn;
                     close(opp->fd);
                     opp->fd = -1;
                     *opp_connected = false;
@@ -363,12 +385,15 @@ void *game_start(void *arg) {
                 }
 
                 int count = player_parse(buf, fields, 6);
-                if (count >= 3 && strcmp(fields[2], "MOVE") == 0) {
+                if (count == 5 && strcmp(fields[2], "MOVE") == 0) {
                     // impatient
                     player_send_fail(opp, "31 Impatient");
 
-                } else if (count >= 3 && strcmp(fields[2], "OPEN") == 0) {
+                } else if (count == 4 && strcmp(fields[2], "OPEN") == 0) {
+                    //alr open
+                    //current player wins
                     player_send_fail(opp, "23 Already Open");
+                    winner = g->turn;
                     close(opp->fd);
                     opp->fd = -1;
                     *opp_connected = false;
@@ -376,13 +401,24 @@ void *game_start(void *arg) {
                     break;
 
                 } else {
+                    //invalid
+                    //current player wins
                     player_send_fail(opp, "10 Invalid");
+                    winner = g->turn;
+                    close(opp->fd);
+                    opp->fd = -1;
+                    *opp_connected = false;
+                    ff = true;
+                    break;
                 }
             }
 
             if (*curr_connected && FD_ISSET(curr->fd, &readfds)) {
                 int n = player_receive(curr, buf, sizeof(buf));
                 if (n <= 0) {
+                    //forfeit
+                    //other player wins
+                    winner = 3 - g->turn;
                     close(curr->fd);
                     curr->fd = -1;
                     *curr_connected = false;
@@ -393,6 +429,9 @@ void *game_start(void *arg) {
                 int count = player_parse(buf, fields, 6);
 
                 if (count >= 3 && strcmp(fields[2], "OPEN") == 0) {
+                    //alr open
+                    //other player wins
+                    winner = 3 - g->turn;
                     player_send_fail(curr, "23 Already Open");
                     close(curr->fd);
                     curr->fd = -1;
@@ -402,6 +441,9 @@ void *game_start(void *arg) {
                 }
 
                 if (count != 5 || strcmp(fields[2], "MOVE") != 0) {
+                    //invalid
+                    //other player wins
+                    winner = 3 - g->turn;
                     char *msg = player_build("FAIL", (char[][128]){"10 Invalid"}, 1);
                     player_send(curr, msg);
                     free(msg);
@@ -457,8 +499,11 @@ void *game_start(void *arg) {
     snprintf(state, sizeof(state), "%d %d %d %d %d",
              g->board[0], g->board[1], g->board[2], g->board[3], g->board[4]);
 
-    
-    sprintf(fields[0], "%d", 3 - g->turn);
+    //game ends normally
+    if (winner == 0){
+        winner = 3 - g->turn;
+    }
+    sprintf(fields[0], "%d", winner);
     strcpy(fields[1], state);
     strcpy(fields[2], "");
     if (ff == true) {
@@ -471,22 +516,8 @@ void *game_start(void *arg) {
     free(msg);
 
     pthread_mutex_lock(&queue_mutex);
-    for (int i = 0; i < wait_count; i++) {
-        if (waiting_players[i] == g->p1) {
-            for (int j = i + 1; j < wait_count; j++)
-                waiting_players[j - 1] = waiting_players[j];
-            wait_count--;
-            break;
-        }
-    }
-    for (int i = 0; i < wait_count; i++) {
-        if (waiting_players[i] == g->p2) {
-            for (int j = i + 1; j < wait_count; j++)
-                waiting_players[j - 1] = waiting_players[j];
-            wait_count--;
-            break;
-        }
-    }
+    remove_player(g->p1);
+    remove_player(g->p2);
     pthread_mutex_unlock(&queue_mutex);
 
     game_destroy(g);
@@ -630,28 +661,21 @@ void *client_thread(void *arg) {
     // extra cred
     while (!p->in_game) {
         fd_set readfds;
-        struct timeval tv;
         FD_ZERO(&readfds);
         FD_SET(p->fd, &readfds);
 
-        tv.tv_sec = 0;
-        tv.tv_usec = 100000; 
+        int ready = select(p->fd + 1, &readfds, NULL, NULL, NULL);
 
-        int ready = select(p->fd + 1, &readfds, NULL, NULL, &tv);
+        if (p->in_game){
+            break;
+        }
 
         if (ready > 0 && FD_ISSET(p->fd, &readfds)) {
             char buf[128];
             int n = player_receive(p, buf, sizeof(buf));
             if (n <= 0) {
                 pthread_mutex_lock(&queue_mutex);
-                for (int i = 0; i < wait_count; i++) {
-                    if (waiting_players[i] == p) {
-                        for (int j = i + 1; j < wait_count; j++)
-                            waiting_players[j - 1] = waiting_players[j];
-                        wait_count--;
-                        break;
-                    }
-                }
+                remove_player(p);
                 pthread_mutex_unlock(&queue_mutex);
                 player_destroy(p);
                 return NULL;
@@ -663,28 +687,14 @@ void *client_thread(void *arg) {
             if (count >= 3 && strcmp(fields[2], "MOVE") == 0) {
                 player_send_fail(p, "24 Not Playing");
                 pthread_mutex_lock(&queue_mutex);
-                for (int i = 0; i < wait_count; i++) {
-                    if (waiting_players[i] == p) {
-                        for (int j = i + 1; j < wait_count; j++)
-                            waiting_players[j - 1] = waiting_players[j];
-                        wait_count--;
-                        break;
-                    }
-                }
+                remove_player(p);
                 pthread_mutex_unlock(&queue_mutex);
                 player_destroy(p);
                 return NULL;
             } else if (count >= 3 && strcmp(fields[2], "OPEN") == 0) {
                 player_send_fail(p, "23 Already Open");
                 pthread_mutex_lock(&queue_mutex);
-                for (int i = 0; i < wait_count; i++) {
-                    if (waiting_players[i] == p) {
-                        for (int j = i + 1; j < wait_count; j++)
-                            waiting_players[j - 1] = waiting_players[j];
-                        wait_count--;
-                        break;
-                    }
-                }
+                remove_player(p);
                 pthread_mutex_unlock(&queue_mutex);
                 player_destroy(p);
                 return NULL;
