@@ -624,10 +624,12 @@ void *client_thread(void *arg) {
         player_destroy(p);
         return NULL;
     }
+    pthread_mutex_unlock(&queue_mutex);
 
     player_send_wait(p);
 
 
+    pthread_mutex_lock(&queue_mutex);
     if (wait_count < Q_SIZE) {
         waiting_players[wait_count++] = p;
     }
@@ -646,9 +648,9 @@ void *client_thread(void *arg) {
         Player *p1 = waiting_players[first_player_in_queue()];
         Player *p2 = waiting_players[second_player_in_queue()];
         // don't remove from queue until end
+        pthread_mutex_unlock(&queue_mutex);
 
         Game *g = game_create(p1, p2);
-        pthread_mutex_unlock(&queue_mutex);
         pthread_t tid;
         pthread_create(&tid, NULL, game_start, g);
         pthread_detach(tid);
