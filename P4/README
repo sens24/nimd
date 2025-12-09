@@ -8,6 +8,7 @@ Team Members:
 Code breakdown:
 The file nimd.c consists of three main parts: game, player, and client_thread/main
 game handles the game logic, player represents a player, and client_threadmain handles the server logic and multithreading.
+The server handles single games, concurrent games, and the extra credit
 
 Game:
 the Game struct stores two players, the board including 5 piles, and whose turn it is (1 or 2)
@@ -16,6 +17,7 @@ It manages receiving and validating moves (validation based on the error codes p
 to update the board and swap turns. 
 Every move, the game checks if the game is over by iterating over the board array and checking the contents of each pile.
 Once the function detects that every pile has the value 0, the game_start loop ends and OVER messages are sent.
+Note: piles are indexed starting at 0, so pile 1 is index 0, pile 2 is index 1, and so forth. 
 
 Player: 
 Each player is represented with a Player struct, which includes their name, socket, and status flags,
